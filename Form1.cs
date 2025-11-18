@@ -1,9 +1,13 @@
-namespace FileManagementSystem;
+using System;
+using System.Windows.Forms;
 
-public partial class Form1 : Form
+namespace FileManagementSystem
 {
-    public Form1()
+    public partial class Form1 : Form
     {
-        InitializeComponent();
+        public Form1()
+        {
+            InitializeComponent();
+        }
     }
 }
