@@ -1,4 +1,4 @@
-namespace Project3App;
+namespace FileManagementSystem;
 
 public partial class Form1 : Form
 {

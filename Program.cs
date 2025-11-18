@@ -1,4 +1,4 @@
-namespace Project3App;
+namespace FileManagementSystem;
 
 static class Program
 {
