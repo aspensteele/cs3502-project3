@@ -2,10 +2,10 @@
 # File Management System 
 A simple Windows Forms file browser with preview support.
 ## Features
-CRUD operations
-Browse folders in a tree view
-Preview images (jpg, png, gif, bmp, ico)
-Preview text files (txt, cs, json, xml, html, css, js, md, log)
+- CRUD operations
+- Browse folders in a tree view
+- Preview images (jpg, png, gif, bmp, ico)
+- Preview text files (txt, cs, json, xml, html, css, js, md, log)
 
 ## Requirements
 
