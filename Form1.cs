@@ -15,7 +15,7 @@ namespace FileManagementSystem
         {
             InitializeComponent();
 
-            // Load user's folder on startup
+            // Load user's folder on startup (e.g., C:\Users\YourName)
             rootPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             txtPath.Text = rootPath;
             lblInstructions.Visible = false;
@@ -23,9 +23,9 @@ namespace FileManagementSystem
             var rootNode = CreateNode(new DirectoryInfo(rootPath));
             rootNode.Text = rootPath; // Show full path for root node
             tvFiles.Nodes.Add(rootNode);
-            tvFiles.Nodes[0].Expand();
+            tvFiles.Nodes[0].Expand(); // Auto-expand root so user sees contents
 
-            // Update path and show preview when selecting a node
+            // Event fires when user clicks a node in the tree
             tvFiles.AfterSelect += (s, e) =>
             {
                 string path = GetFullPath(e.Node);
@@ -48,8 +48,10 @@ namespace FileManagementSystem
                 // Add subdirectories (skip hidden)
                 foreach (var subDir in dir.GetDirectories())
                 {
+                    // Bitwise AND checks if Hidden flag is set in file attributes
+                    // FileAttributes is a flags enum, so multiple attributes can be combined
                     if ((subDir.Attributes & FileAttributes.Hidden) != 0) continue;
-                    node.Nodes.Add(CreateNode(subDir));
+                    node.Nodes.Add(CreateNode(subDir)); 
                 }
 
                 // Add files (skip hidden)
@@ -59,22 +61,25 @@ namespace FileManagementSystem
                     node.Nodes.Add(new TreeNode(file.Name));
                 }
             }
-            catch (UnauthorizedAccessException) { }
+            catch (UnauthorizedAccessException) { } // Silently skip folders we can't access
 
             return node;
         }
 
-        // Builds full path by walking up the tree
+        // Builds full path by walking up the tree from selected node to root
         private string GetFullPath(TreeNode node)
         {
             var parts = new System.Collections.Generic.List<string>();
+
+            // Walk up the tree, collecting each node's text
             while (node != null)
             {
-                parts.Insert(0, node.Text);
+                parts.Insert(0, node.Text); // Insert at beginning to maintain order
                 node = node.Parent;
             }
 
-            // First part is rootPath, combine with the rest
+            // Skip first part (root node text) since rootPath already contains it
+            // Then combine remaining parts into a valid file path
             if (parts.Count > 1)
                 return Path.Combine(rootPath, Path.Combine(parts.Skip(1).ToArray()));
 
@@ -92,7 +97,7 @@ namespace FileManagementSystem
             {
                 txtFileContent.Visible = false;
                 pbPreview.Visible = true;
-                pbPreview.Image?.Dispose();
+                pbPreview.Image?.Dispose(); // Free memory from previous image (?.Dispose = only if not null)
                 pbPreview.Image = Image.FromFile(path);
                 return;
             }
@@ -114,7 +119,7 @@ namespace FileManagementSystem
         // Clears the preview area
         private void ClearPreview()
         {
-            pbPreview.Image?.Dispose();
+            pbPreview.Image?.Dispose(); // Free memory
             pbPreview.Image = null;
             pbPreview.Visible = false;
             txtFileContent.Text = "";
