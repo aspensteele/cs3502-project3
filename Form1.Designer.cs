@@ -37,10 +37,10 @@ namespace FileManagementSystem
             buttonPanel = new Panel();
             btnCreate = new Button();
             btnOpen = new Button();
-            btnSave = new Button(); // Ensure btnSave is here
+            btnSave = new Button();
             btnDelete = new Button();
             btnRename = new Button();
-            btnRefresh = new Button(); // Ensure btnRefresh is here
+            btnRefresh = new Button();
             treePanel = new Panel();
             tvFiles = new TreeView();
             rightPanel = new Panel();

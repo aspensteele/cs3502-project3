@@ -9,7 +9,7 @@ using System.Collections.Generic;
 
 namespace FileManagementSystem
 {
-    public partial class Form1 : Form // This is the 'other part' of the Form1 class
+    public partial class Form1 : Form
     {
         private string rootPath;
         private FileSystemManager _fileSystemManager;
@@ -59,13 +59,15 @@ namespace FileManagementSystem
             rootNode.Nodes.Add("..."); // Placeholder for lazy loading
             tvFiles.Nodes.Add(rootNode);
 
-            // Wire up event handlers
+            // Wire up all event handlers
             tvFiles.BeforeExpand += TvFiles_BeforeExpand;
-            tvFiles.AfterSelect += TvFiles_AfterSelect; // Use a specific handler method for clarity
+            tvFiles.AfterSelect += TvFiles_AfterSelect;
             btnCreate.Click += BtnCreate_Click;
             btnSave.Click += BtnSave_Click;
-            btnRefresh.Click += BtnRefresh_Click; // Assuming you have a btnRefresh in designer
-            // TODO: Add click handlers for btnDelete, btnRename, btnOpen
+            btnRefresh.Click += BtnRefresh_Click;
+            btnDelete.Click += BtnDelete_Click; // Wiring up Delete button
+            btnRename.Click += BtnRename_Click; // Wiring up Rename button
+            // If you have a btnOpen, wire it up here as well.
         }
 
 
@@ -126,8 +128,7 @@ namespace FileManagementSystem
                 string parentDir = Path.GetDirectoryName(_currentEditedFilePath);
                 if (!string.IsNullOrEmpty(parentDir) && !_fileSystemManager.IsDirectory(parentDir))
                 {
-                    // This implies a serious issue if targetDir wasn't valid, but good for robustness.
-                    _fileSystemManager.CreateDirectory(parentDir);
+                    _fileSystemManager.CreateDirectory(parentDir); // Ensure parent exists
                 }
 
                 _fileSystemManager.WriteTextFile(_currentEditedFilePath, txtFileContent.Text);
@@ -179,44 +180,232 @@ namespace FileManagementSystem
         }
 
 
-        // Handler for the Create button
+        // Handler for the Create button (prompts for file or directory)
         private void BtnCreate_Click(object sender, EventArgs e)
         {
             string targetDir = GetSelectedDirectoryPath();
             if (string.IsNullOrEmpty(targetDir))
             {
-                MessageBox.Show(this, "Please select a directory to create the new file in.", "Information",
+                MessageBox.Show(this, "Please select a directory to create a new item in.", "Information",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            string fileName = PromptForInput("Create New File", "Enter file name:");
-            if (string.IsNullOrWhiteSpace(fileName))
+            // Prompt user for type of item to create
+            DialogResult typeResult = MessageBox.Show(this, "Do you want to create a new File or a new Directory?", "Create New Item",
+                MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+
+            if (typeResult == DialogResult.Cancel)
             {
-                lblStatus.Text = "File creation cancelled or invalid name.";
+                lblStatus.Text = "Creation cancelled.";
                 return;
             }
 
-            string newPath = Path.Combine(targetDir, fileName);
+            bool isFile = (typeResult == DialogResult.Yes); // Yes for File, No for Directory
 
-            // Check if file or directory already exists at the new path using FileSystemManager
+            string itemName = PromptForInput($"Create New {(isFile ? "File" : "Directory")}", $"Enter {(isFile ? "file" : "directory")} name:");
+            if (string.IsNullOrWhiteSpace(itemName))
+            {
+                lblStatus.Text = $"{(isFile ? "File" : "Directory")} creation cancelled or invalid name.";
+                return;
+            }
+
+            string newPath = Path.Combine(targetDir, itemName);
+
             if (_fileSystemManager.PathExists(newPath))
             {
-                MessageBox.Show(this, "A file or directory with that name already exists. Please choose a different name.", "Error",
+                MessageBox.Show(this, $"A {(isFile ? "file" : "directory")} with that name already exists. Please choose a different name.", "Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            // Set the content area for a new, unsaved file
-            _currentEditedFilePath = newPath;
-            txtFileContent.Text = ""; // Start with empty content
-            txtFileContent.ReadOnly = false; // Enable editing
-            txtFileContent.Visible = true;
-            pbPreview.Visible = false;
-            btnSave.Visible = true; // Show Save button to persist the new file
+            try
+            {
+                if (isFile)
+                {
+                    _currentEditedFilePath = newPath;
+                    txtFileContent.Text = "";
+                    txtFileContent.ReadOnly = false;
+                    txtFileContent.Visible = true;
+                    pbPreview.Visible = false;
+                    btnSave.Visible = true;
+                    lblStatus.Text = $"New file '{itemName}' ready for content. Press Save to create on disk.";
+                }
+                else // Create Directory
+                {
+                    _fileSystemManager.CreateDirectory(newPath);
+                    RefreshNode(FindNodeByPath(targetDir)); // Refresh parent to show new directory
+                    lblStatus.Text = $"Created directory: {itemName}";
+                    MessageBox.Show(this, $"Directory created: {itemName}", "Success",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (IOException ex)
+            {
+                MessageBox.Show(this, $"Error creating {(isFile ? "file" : "directory")}: {ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                lblStatus.Text = $"Error: {ex.Message}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"An unexpected error occurred: {ex.Message}", "Error",
+            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                lblStatus.Text = $"Error: {ex.Message}";
+            }
+        }
 
-            lblStatus.Text = $"New file '{fileName}' created. Enter content and save.";
-            // The file itself is not created on disk until BtnSave_Click is called.
+
+        // Handler for deleting files or directories
+        private void BtnDelete_Click(object sender, EventArgs e)
+        {
+            var selectedNode = tvFiles.SelectedNode;
+            if (selectedNode == null)
+            {
+                MessageBox.Show(this, "Please select a file or directory to delete.", "Information",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var selectedEntry = selectedNode.Tag as FileSystemEntry;
+            if (selectedEntry == null) return;
+
+            DialogResult confirmResult;
+            if (selectedEntry.Type == FileSystemEntryType.Directory && Directory.EnumerateFileSystemEntries(selectedEntry.FullPath).Any())
+            {
+                confirmResult = MessageBox.Show(this,
+                    $"The directory '{selectedEntry.Name}' is not empty. Deleting it will permanently remove all its contents. Are you sure?",
+                    "Confirm Recursive Delete",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+            }
+            else
+            {
+                confirmResult = MessageBox.Show(this,
+                    $"Are you sure you want to delete '{selectedEntry.Name}'?",
+                    "Confirm Delete",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+            }
+
+
+            if (confirmResult == DialogResult.Yes)
+            {
+                try
+                {
+                    if (selectedEntry.Type == FileSystemEntryType.File)
+                    {
+                        _fileSystemManager.DeleteFileSystemEntry(selectedEntry.FullPath, FileSystemEntryType.File);
+                    }
+                    else // Directory
+                    {
+                        if (Directory.EnumerateFileSystemEntries(selectedEntry.FullPath).Any())
+                        {
+                            _fileSystemManager.DeleteDirectoryRecursive(selectedEntry.FullPath);
+                        }
+                        else
+                        {
+                            _fileSystemManager.DeleteFileSystemEntry(selectedEntry.FullPath, FileSystemEntryType.Directory);
+                        }
+                    }
+
+                    // Get parent path before deleting the node itself
+                    string parentDirPath = Path.GetDirectoryName(selectedEntry.FullPath);
+                    TreeNode parentNode = FindNodeByPath(parentDirPath);
+
+                    if (parentNode != null)
+                    {
+                        RefreshNode(parentNode); // Refresh the parent to remove the deleted item from view
+                    }
+                    else
+                    {
+                        // If parent node couldn't be found (e.g., root deleted), refresh root
+                        RefreshNode(tvFiles.Nodes[0]);
+                    }
+
+                    ClearContentArea(); // Clear preview after deletion
+                    lblStatus.Text = $"Deleted: {selectedEntry.Name}";
+                    MessageBox.Show(this, $"Deleted: {selectedEntry.Name}", "Success",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (IOException ex)
+                {
+                    MessageBox.Show(this, $"Error deleting {selectedEntry.Name}: {ex.Message}", "Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    lblStatus.Text = $"Error: {ex.Message}";
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, $"An unexpected error occurred: {ex.Message}", "Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    lblStatus.Text = $"Error: {ex.Message}";
+                }
+            }
+        }
+
+        // Handler for renaming files or directories
+        private void BtnRename_Click(object sender, EventArgs e)
+        {
+            var selectedNode = tvFiles.SelectedNode;
+            if (selectedNode == null)
+            {
+                MessageBox.Show(this, "Please select a file or directory to rename.", "Information",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var selectedEntry = selectedNode.Tag as FileSystemEntry;
+            if (selectedEntry == null) return;
+
+            string oldName = selectedEntry.Name;
+            string newName = PromptForInput($"Rename {oldName}", $"Enter new name for '{oldName}':", oldName); // Pre-fill with old name
+
+            if (string.IsNullOrWhiteSpace(newName) || newName.Equals(oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                lblStatus.Text = "Rename cancelled or new name is invalid/same as old name.";
+                return;
+            }
+
+            string parentDirPath = Path.GetDirectoryName(selectedEntry.FullPath);
+            string newFullPath = Path.Combine(parentDirPath, newName);
+
+            try
+            {
+                _fileSystemManager.RenameFileSystemEntry(selectedEntry.FullPath, newFullPath, selectedEntry.Type);
+
+                // Update the TreeView node directly and then refresh its parent
+                selectedEntry.Name = newName; // Update the in-memory object
+                selectedEntry.FullPath = newFullPath; // Update full path
+                selectedNode.Text = newName; // Update the displayed text in the TreeView
+
+                RefreshNode(FindNodeByPath(parentDirPath)); // Refresh parent to reflect potential sorting changes
+
+                // After rename, ensure the item is still selected and preview is updated if it's a file
+                tvFiles.SelectedNode = selectedNode;
+                if (selectedEntry.Type == FileSystemEntryType.File)
+                {
+                    ShowFileContent(newFullPath);
+                }
+                else
+                {
+                    ClearContentArea();
+                }
+
+                lblStatus.Text = $"Renamed '{oldName}' to '{newName}'";
+                MessageBox.Show(this, $"Renamed: '{oldName}' to '{newName}'", "Success",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (IOException ex)
+            {
+                MessageBox.Show(this, $"Error renaming {oldName}: {ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                lblStatus.Text = $"Error: {ex.Message}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"An unexpected error occurred: {ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                lblStatus.Text = $"Error: {ex.Message}";
+            }
         }
 
 
@@ -314,8 +503,8 @@ namespace FileManagementSystem
             return selectedEntry.FullPath; // If a directory is selected, return its own path
         }
 
-        // Displays a custom input dialog for user input
-        private string PromptForInput(string title, string prompt)
+        // Displays a custom input dialog for user input (overloaded to allow default value)
+        private string PromptForInput(string title, string prompt, string defaultValue = "")
         {
             using (var form = new Form())
             {
@@ -328,7 +517,7 @@ namespace FileManagementSystem
                 form.TopMost = true;
 
                 var lbl = new Label { Text = prompt, Left = 10, Top = 15, Width = 350 };
-                var txt = new TextBox { Left = 10, Top = 45, Width = 350 };
+                var txt = new TextBox { Left = 10, Top = 45, Width = 350, Text = defaultValue };
 
                 var btnOk = new Button { Text = "OK", Left = 190, Top = 100, Width = 80, Height = 35, DialogResult = DialogResult.OK };
                 var btnCancel = new Button { Text = "Cancel", Left = 280, Top = 100, Width = 80, Height = 35, DialogResult = DialogResult.Cancel };

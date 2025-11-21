@@ -51,7 +51,6 @@ namespace FileManagementSystem
 
             if (!Directory.Exists(path))
             {
-                // This shouldn't typically be hit if UI validates path, but good for robustness
                 throw new DirectoryNotFoundException($"Directory not found: {path}");
             }
 
@@ -71,12 +70,10 @@ namespace FileManagementSystem
             }
             catch (UnauthorizedAccessException)
             {
-                // Silently skip if we can't access, or log it if more detailed error reporting is needed
                 Console.WriteLine($"Access denied to directory: {path}");
             }
             catch (Exception ex)
             {
-                // Catch other potential errors like PathTooLongException
                 Console.Error.WriteLine($"Error listing directories in {path}: {ex.Message}");
                 throw new IOException($"Error listing directories in {path}: {ex.Message}", ex);
             }
@@ -118,14 +115,11 @@ namespace FileManagementSystem
         {
             if (File.Exists(fullPath) || Directory.Exists(fullPath))
             {
-                // Throw specific exception for better handling in UI
                 throw new IOException("A file or directory with that name already exists.");
             }
 
             try
             {
-                // File.Create creates and opens for writing, then closes.
-                // We use 'using' to ensure the file handle is properly disposed.
                 using (File.Create(fullPath)) { }
                 return true;
             }
@@ -293,7 +287,7 @@ namespace FileManagementSystem
             {
                 return (File.GetAttributes(path) & FileAttributes.Directory) == FileAttributes.Directory;
             }
-            catch (Exception) { return false; } // Handle cases where GetAttributes might fail (e.g., permissions)
+            catch (Exception) { return false; }
         }
 
         // Helper to check if a path is a file
@@ -304,7 +298,7 @@ namespace FileManagementSystem
             {
                 return (File.GetAttributes(path) & FileAttributes.Directory) != FileAttributes.Directory;
             }
-            catch (Exception) { return false; } // Handle cases where GetAttributes might fail
+            catch (Exception) { return false; }
         }
 
         // Helper to check if a path exists
