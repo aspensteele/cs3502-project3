@@ -3,7 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq; // For .Select and .ToArray
+using System.Linq;
 
 namespace FileManagementSystem
 {
@@ -14,7 +14,7 @@ namespace FileManagementSystem
         Directory
     }
 
-    // A lightweight struct or class to represent a file/directory entry
+    // A lightweight class to represent a file/directory entry
     // This avoids tying the UI directly to System.IO.FileSystemInfo
     public class FileSystemEntry
     {
@@ -51,9 +51,8 @@ namespace FileManagementSystem
 
             if (!Directory.Exists(path))
             {
-                // You might want to throw an exception here or return an empty list with a warning
-                Console.WriteLine($"Warning: Directory not found: {path}");
-                return entries;
+                // This shouldn't typically be hit if UI validates path, but good for robustness
+                throw new DirectoryNotFoundException($"Directory not found: {path}");
             }
 
             // Get subdirectories
@@ -79,6 +78,7 @@ namespace FileManagementSystem
             {
                 // Catch other potential errors like PathTooLongException
                 Console.Error.WriteLine($"Error listing directories in {path}: {ex.Message}");
+                throw new IOException($"Error listing directories in {path}: {ex.Message}", ex);
             }
 
             // Get files
@@ -102,6 +102,7 @@ namespace FileManagementSystem
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Error listing files in {path}: {ex.Message}");
+                throw new IOException($"Error listing files in {path}: {ex.Message}", ex);
             }
 
             // Sort by type (directories first), then by name
@@ -115,37 +116,34 @@ namespace FileManagementSystem
         /// <returns>True if the file was created successfully, false otherwise.</returns>
         public bool CreateFile(string fullPath)
         {
-            if (File.Exists(fullPath))
+            if (File.Exists(fullPath) || Directory.Exists(fullPath))
             {
-                // This scenario should ideally be checked by the UI before calling this method
-                // or handled with a more specific exception/return code.
-                throw new IOException("A file with that name already exists.");
+                // Throw specific exception for better handling in UI
+                throw new IOException("A file or directory with that name already exists.");
             }
 
             try
             {
-                using (File.Create(fullPath)) { } // Create and properly close the file handle
+                // File.Create creates and opens for writing, then closes.
+                // We use 'using' to ensure the file handle is properly disposed.
+                using (File.Create(fullPath)) { }
                 return true;
             }
             catch (Exception ex)
             {
-                // Log the exception for debugging purposes
                 Console.Error.WriteLine($"Error creating file {fullPath}: {ex.Message}");
-                // Re-throw or return false depending on desired error handling strategy
                 throw new IOException($"Failed to create file: {ex.Message}", ex);
             }
         }
-
-        // --- CRUD operations for future implementation ---
 
         /// <summary>
         /// Creates a new directory.
         /// </summary>
         public bool CreateDirectory(string fullPath)
         {
-            if (Directory.Exists(fullPath))
+            if (Directory.Exists(fullPath) || File.Exists(fullPath))
             {
-                throw new IOException("A directory with that name already exists.");
+                throw new IOException("A file or directory with that name already exists.");
             }
             try
             {
@@ -180,7 +178,7 @@ namespace FileManagementSystem
         }
 
         /// <summary>
-        /// Writes content to a text file.
+        /// Writes content to a text file. If the file does not exist, it will be created.
         /// </summary>
         public bool WriteTextFile(string fullPath, string content)
         {
@@ -205,25 +203,21 @@ namespace FileManagementSystem
             {
                 if (type == FileSystemEntryType.File)
                 {
-                    if (File.Exists(fullPath))
-                    {
-                        File.Delete(fullPath);
-                        return true;
-                    }
-                    throw new FileNotFoundException("File not found for deletion.", fullPath);
+                    if (!File.Exists(fullPath))
+                        throw new FileNotFoundException("File not found for deletion.", fullPath);
+                    File.Delete(fullPath);
+                    return true;
                 }
                 else // Directory
                 {
-                    if (Directory.Exists(fullPath))
+                    if (!Directory.Exists(fullPath))
+                        throw new DirectoryNotFoundException("Directory not found for deletion.");
+                    if (Directory.EnumerateFileSystemEntries(fullPath).Any())
                     {
-                        if (Directory.EnumerateFileSystemEntries(fullPath).Any())
-                        {
-                            throw new IOException("Cannot delete non-empty directory. Use DeleteDirectoryRecursive for that.");
-                        }
-                        Directory.Delete(fullPath);
-                        return true;
+                        throw new IOException("Cannot delete non-empty directory. Use DeleteDirectoryRecursive for that.");
                     }
-                    throw new DirectoryNotFoundException("Directory not found for deletion.");
+                    Directory.Delete(fullPath);
+                    return true;
                 }
             }
             catch (Exception ex)
@@ -294,8 +288,29 @@ namespace FileManagementSystem
         // Helper to check if a path is a directory
         public bool IsDirectory(string path)
         {
-            // Check if it exists and is a directory
-            return Directory.Exists(path) && (File.GetAttributes(path) & FileAttributes.Directory) == FileAttributes.Directory;
+            if (!PathExists(path)) return false;
+            try
+            {
+                return (File.GetAttributes(path) & FileAttributes.Directory) == FileAttributes.Directory;
+            }
+            catch (Exception) { return false; } // Handle cases where GetAttributes might fail (e.g., permissions)
+        }
+
+        // Helper to check if a path is a file
+        public bool IsFile(string path)
+        {
+            if (!PathExists(path)) return false;
+            try
+            {
+                return (File.GetAttributes(path) & FileAttributes.Directory) != FileAttributes.Directory;
+            }
+            catch (Exception) { return false; } // Handle cases where GetAttributes might fail
+        }
+
+        // Helper to check if a path exists
+        public bool PathExists(string path)
+        {
+            return File.Exists(path) || Directory.Exists(path);
         }
     }
 }
