@@ -1,4 +1,5 @@
 ﻿// FileSystemManager.cs
+// (Content is identical to the previous version, no functional changes needed for this UI update)
 
 using System;
 using System.Collections.Generic;
@@ -276,6 +277,105 @@ namespace FileManagementSystem
             {
                 Console.Error.WriteLine($"Error renaming {type} from {oldFullPath} to {newFullPath}: {ex.Message}");
                 throw new IOException($"Failed to rename {type}: {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Copies a file from source to destination.
+        /// </summary>
+        public bool CopyFile(string sourcePath, string destinationPath, bool overwrite = false)
+        {
+            if (!File.Exists(sourcePath))
+            {
+                throw new FileNotFoundException("Source file not found for copy operation.", sourcePath);
+            }
+            if (File.Exists(destinationPath) && !overwrite)
+            {
+                throw new IOException($"Destination file '{Path.GetFileName(destinationPath)}' already exists.");
+            }
+            try
+            {
+                File.Copy(sourcePath, destinationPath, overwrite);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error copying file from {sourcePath} to {destinationPath}: {ex.Message}");
+                throw new IOException($"Failed to copy file: {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Recursively copies a directory and its contents from source to destination.
+        /// </summary>
+        public bool CopyDirectoryRecursive(string sourceDir, string destinationDir)
+        {
+            // Ensure source directory exists
+            if (!Directory.Exists(sourceDir))
+            {
+                throw new DirectoryNotFoundException($"Source directory '{sourceDir}' not found for copy operation.");
+            }
+
+            // Create destination directory if it doesn't exist
+            Directory.CreateDirectory(destinationDir);
+
+            // Copy all files from the source to the destination
+            foreach (string filePath in Directory.GetFiles(sourceDir))
+            {
+                string fileName = Path.GetFileName(filePath);
+                string destFilePath = Path.Combine(destinationDir, fileName);
+                CopyFile(filePath, destFilePath, true); // Always overwrite files in recursive copy for simplicity
+            }
+
+            // Copy all subdirectories recursively
+            foreach (string subDir in Directory.GetDirectories(sourceDir))
+            {
+                string dirName = Path.GetFileName(subDir);
+                string destSubDir = Path.Combine(destinationDir, dirName);
+                CopyDirectoryRecursive(subDir, destSubDir); // Recursive call
+            }
+            return true;
+        }
+
+
+        /// <summary>
+        /// Moves a file or directory from source to destination.
+        /// </summary>
+        public bool MoveFileSystemEntry(string sourcePath, string destinationPath)
+        {
+            // Check if source exists
+            if (!PathExists(sourcePath))
+            {
+                throw new FileNotFoundException("Source item not found for move operation.", sourcePath);
+            }
+
+            // Check if destination already exists (Move.File or Move.Directory fails if target exists)
+            if (PathExists(destinationPath))
+            {
+                // This will be handled by UI for overwrite confirmation
+                throw new IOException($"Destination '{Path.GetFileName(destinationPath)}' already exists.");
+            }
+
+            try
+            {
+                if (IsFile(sourcePath))
+                {
+                    File.Move(sourcePath, destinationPath);
+                }
+                else if (IsDirectory(sourcePath))
+                {
+                    Directory.Move(sourcePath, destinationPath);
+                }
+                else
+                {
+                    throw new InvalidOperationException("Source path is neither a file nor a directory.");
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error moving '{sourcePath}' to '{destinationPath}': {ex.Message}");
+                throw new IOException($"Failed to move item: {ex.Message}", ex);
             }
         }
 

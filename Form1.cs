@@ -1,4 +1,4 @@
-﻿// Form1.cs - Your custom logic and event handlers go here
+﻿// Form1.cs
 
 using System;
 using System.Drawing;
@@ -17,12 +17,17 @@ namespace FileManagementSystem
         private static readonly string[] ImageExtensions = { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".ico" };
         private static readonly string[] TextExtensions = { ".txt", ".cs", ".json", ".xml", ".html", ".css", ".js", ".md", ".log" };
 
-        private string _currentEditedFilePath = null;
+        private string _currentEditedFilePath = null; // Path of the file currently in the content editor
+
+        // --- FIELDS FOR COPY/PASTE/CUT ---
+        private string _clipboardSourcePath = null;
+        private FileSystemEntryType _clipboardSourceType;
+        private bool _isCutOperation = false; // True if it's a "cut" (move) operation
 
 
         public Form1()
         {
-            InitializeComponent(); // This calls the method from Form1.Designer.cs
+            InitializeComponent();
 
             _fileSystemManager = new FileSystemManager();
 
@@ -44,14 +49,13 @@ namespace FileManagementSystem
             }
             catch (Exception ex)
             {
-                // More robust fallback if even getting attributes fails
                 rootPath = AppDomain.CurrentDomain.BaseDirectory;
                 rootAttributes = FileAttributes.Directory; // Assume it's a directory
                 MessageBox.Show(this, $"Error accessing user profile path. Defaulting to application directory: {rootPath}\nError: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
 
             txtPath.Text = rootPath;
-            lblInstructions.Visible = false; // Hide instructions after initial load
+            lblInstructions.Visible = false;
 
             // Initialize root node in TreeView
             var rootEntry = new FileSystemEntry(Path.GetFileName(rootPath), rootPath, FileSystemEntryType.Directory, rootAttributes);
@@ -65,9 +69,16 @@ namespace FileManagementSystem
             btnCreate.Click += BtnCreate_Click;
             btnSave.Click += BtnSave_Click;
             btnRefresh.Click += BtnRefresh_Click;
-            btnDelete.Click += BtnDelete_Click; // Wiring up Delete button
-            btnRename.Click += BtnRename_Click; // Wiring up Rename button
-            // If you have a btnOpen, wire it up here as well.
+            btnDelete.Click += BtnDelete_Click;
+            btnRename.Click += BtnRename_Click;
+            btnCopy.Click += BtnCopy_Click;
+            btnCut.Click += BtnCut_Click; // New Cut button handler
+            btnPaste.Click += BtnPaste_Click;
+            btnOpen.Click += BtnOpen_Click;
+
+            // Initial state for buttons
+            btnSave.Visible = false; // Hide save until a text file is open for editing
+            btnPaste.Enabled = false; // Disable paste until something is copied/cut
         }
 
 
@@ -77,7 +88,7 @@ namespace FileManagementSystem
             var selectedEntry = e.Node.Tag as FileSystemEntry;
             if (selectedEntry == null)
             {
-                ClearContentArea(); // Clear if selection is invalid or null
+                ClearContentArea();
                 return;
             }
 
@@ -86,13 +97,12 @@ namespace FileManagementSystem
             if (selectedEntry.Type == FileSystemEntryType.File)
                 ShowFileContent(selectedEntry.FullPath);
             else
-                ClearContentArea(); // Clear content area if a directory is selected
+                ClearContentArea();
         }
 
         // Handler for the Refresh button
         private void BtnRefresh_Click(object sender, EventArgs e)
         {
-            // Refresh the currently selected node, or the root if nothing is selected
             TreeNode selectedNode = tvFiles.SelectedNode ?? tvFiles.Nodes[0];
             if (selectedNode != null)
             {
@@ -119,12 +129,10 @@ namespace FileManagementSystem
                 return;
             }
 
-            // Check if it's a new file (doesn't exist yet on disk)
             bool isNewFile = !_fileSystemManager.PathExists(_currentEditedFilePath);
 
             try
             {
-                // If it's a new file, ensure its parent directory exists
                 string parentDir = Path.GetDirectoryName(_currentEditedFilePath);
                 if (!string.IsNullOrEmpty(parentDir) && !_fileSystemManager.IsDirectory(parentDir))
                 {
@@ -137,7 +145,6 @@ namespace FileManagementSystem
                 MessageBox.Show(this, $"File saved: {Path.GetFileName(_currentEditedFilePath)}", "Success",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-                // If it was a new file, refresh the parent node to show it
                 if (isNewFile)
                 {
                     string parentDirPath = Path.GetDirectoryName(_currentEditedFilePath);
@@ -145,22 +152,19 @@ namespace FileManagementSystem
                     if (parentNode != null)
                     {
                         RefreshNode(parentNode);
-                        // After refreshing, try to select the newly created node
-                        // This ensures the new file is visible and selected
                         foreach (TreeNode node in parentNode.Nodes)
                         {
                             var entry = node.Tag as FileSystemEntry;
                             if (entry != null && entry.FullPath.Equals(_currentEditedFilePath, StringComparison.OrdinalIgnoreCase))
                             {
                                 tvFiles.SelectedNode = node;
-                                node.EnsureVisible(); // Scrolls the tree view to make the node visible
+                                node.EnsureVisible();
                                 break;
                             }
                         }
                     }
                     else
                     {
-                        // Fallback: If parent node not found (e.g., root not fully loaded), refresh root
                         RefreshNode(tvFiles.Nodes[0]);
                     }
                 }
@@ -191,7 +195,6 @@ namespace FileManagementSystem
                 return;
             }
 
-            // Prompt user for type of item to create
             DialogResult typeResult = MessageBox.Show(this, "Do you want to create a new File or a new Directory?", "Create New Item",
                 MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
 
@@ -201,7 +204,7 @@ namespace FileManagementSystem
                 return;
             }
 
-            bool isFile = (typeResult == DialogResult.Yes); // Yes for File, No for Directory
+            bool isFile = (typeResult == DialogResult.Yes);
 
             string itemName = PromptForInput($"Create New {(isFile ? "File" : "Directory")}", $"Enter {(isFile ? "file" : "directory")} name:");
             if (string.IsNullOrWhiteSpace(itemName))
@@ -249,7 +252,7 @@ namespace FileManagementSystem
             catch (Exception ex)
             {
                 MessageBox.Show(this, $"An unexpected error occurred: {ex.Message}", "Error",
-            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
                 lblStatus.Text = $"Error: {ex.Message}";
             }
         }
@@ -408,13 +411,207 @@ namespace FileManagementSystem
             }
         }
 
+        // Handler for Copy button (sets the item to be copied)
+        private void BtnCopy_Click(object sender, EventArgs e)
+        {
+            var selectedNode = tvFiles.SelectedNode;
+            if (selectedNode == null)
+            {
+                MessageBox.Show(this, "Please select a file or directory to copy.", "Information",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var selectedEntry = selectedNode.Tag as FileSystemEntry;
+            if (selectedEntry == null) return;
+
+            _clipboardSourcePath = selectedEntry.FullPath;
+            _clipboardSourceType = selectedEntry.Type;
+            _isCutOperation = false; // This is a COPY operation
+
+            btnPaste.Enabled = true; // Enable paste button
+            lblStatus.Text = $"Copied: {selectedEntry.Name}";
+        }
+
+        // Handler for Cut button (sets the item to be moved)
+        private void BtnCut_Click(object sender, EventArgs e)
+        {
+            var selectedNode = tvFiles.SelectedNode;
+            if (selectedNode == null)
+            {
+                MessageBox.Show(this, "Please select a file or directory to cut (move).", "Information",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var selectedEntry = selectedNode.Tag as FileSystemEntry;
+            if (selectedEntry == null) return;
+
+            _clipboardSourcePath = selectedEntry.FullPath;
+            _clipboardSourceType = selectedEntry.Type;
+            _isCutOperation = true; // This is a CUT/MOVE operation
+
+            btnPaste.Enabled = true; // Enable paste button
+            lblStatus.Text = $"Cut: {selectedEntry.Name}";
+        }
+
+        // Handler for Paste button (performs copy or move operation)
+        private void BtnPaste_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(_clipboardSourcePath))
+            {
+                MessageBox.Show(this, "Nothing has been copied or cut to paste.", "Information",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string destinationDir = GetSelectedDirectoryPath(); // Target directory to paste into
+            if (string.IsNullOrEmpty(destinationDir))
+            {
+                MessageBox.Show(this, "Please select a destination directory to paste into.", "Information",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string sourceItemName = Path.GetFileName(_clipboardSourcePath);
+            string destinationPath = Path.Combine(destinationDir, sourceItemName);
+
+            // Cannot paste into itself or its child (for directories)
+            if (_clipboardSourceType == FileSystemEntryType.Directory && destinationPath.StartsWith(_clipboardSourcePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show(this, "Cannot paste a directory into itself or its subdirectory.", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            // Prevent pasting an item back to its exact same location for a "move" (cut) operation
+            if (_isCutOperation && _clipboardSourcePath.Equals(destinationPath, StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show(this, "Cannot move an item to its original location.", "Information",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Handle conflicts before operation
+            if (_fileSystemManager.PathExists(destinationPath))
+            {
+                string conflictMsg = $"{sourceItemName} already exists in the destination. Overwrite?";
+                DialogResult overwriteResult = MessageBox.Show(this, conflictMsg, "Item Conflict",
+                    MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+
+                if (overwriteResult == DialogResult.Cancel)
+                {
+                    lblStatus.Text = "Paste operation cancelled due to conflict.";
+                    return;
+                }
+                if (overwriteResult == DialogResult.No)
+                {
+                    lblStatus.Text = "Paste operation cancelled. Not overwriting existing item.";
+                    return;
+                }
+                // If overwriteResult is Yes, we proceed to delete the existing item first.
+                try
+                {
+                    if (_fileSystemManager.IsFile(destinationPath))
+                    {
+                        _fileSystemManager.DeleteFileSystemEntry(destinationPath, FileSystemEntryType.File);
+                    }
+                    else if (_fileSystemManager.IsDirectory(destinationPath))
+                    {
+                        _fileSystemManager.DeleteDirectoryRecursive(destinationPath);
+                    }
+                }
+                catch (IOException ex)
+                {
+                    MessageBox.Show(this, $"Error preparing for overwrite: {ex.Message}", "Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    lblStatus.Text = $"Error: {ex.Message}";
+                    return;
+                }
+            }
+
+            try
+            {
+                string originalSourceParentPath = Path.GetDirectoryName(_clipboardSourcePath);
+
+                if (_isCutOperation) // Perform Move
+                {
+                    _fileSystemManager.MoveFileSystemEntry(_clipboardSourcePath, destinationPath);
+                    lblStatus.Text = $"Moved: {sourceItemName} to {destinationDir}";
+                }
+                else // Perform Copy
+                {
+                    if (_clipboardSourceType == FileSystemEntryType.File)
+                    {
+                        _fileSystemManager.CopyFile(_clipboardSourcePath, destinationPath, true);
+                    }
+                    else // Directory Copy
+                    {
+                        _fileSystemManager.CopyDirectoryRecursive(_clipboardSourcePath, destinationPath);
+                    }
+                    lblStatus.Text = $"Copied: {sourceItemName} to {destinationDir}";
+                }
+
+                // Refresh affected directories
+                RefreshNode(FindNodeByPath(originalSourceParentPath)); // Always refresh source parent (for move, item disappears)
+                RefreshNode(FindNodeByPath(destinationDir));          // Always refresh destination
+
+                ClearClipboardState(); // Reset clipboard state after paste
+                MessageBox.Show(this, $"Item pasted: {sourceItemName}", "Success",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (IOException ex)
+            {
+                MessageBox.Show(this, $"Error pasting {sourceItemName}: {ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                lblStatus.Text = $"Error: {ex.Message}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"An unexpected error occurred during paste: {ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                lblStatus.Text = $"Error: {ex.Message}";
+            }
+        }
+
+        // Handler for Open Folder button
+        private void BtnOpen_Click(object sender, EventArgs e)
+        {
+            using (var fbd = new FolderBrowserDialog())
+            {
+                fbd.Description = "Select a folder to browse:";
+                fbd.ShowNewFolderButton = false;
+
+                if (fbd.ShowDialog(this) == DialogResult.OK)
+                {
+                    rootPath = fbd.SelectedPath;
+                    txtPath.Text = rootPath;
+
+                    tvFiles.Nodes.Clear();
+                    FileAttributes currentRootAttributes = FileAttributes.Directory;
+                    try { currentRootAttributes = File.GetAttributes(rootPath); }
+                    catch { /* default to directory */ }
+
+                    var rootEntry = new FileSystemEntry(Path.GetFileName(rootPath), rootPath, FileSystemEntryType.Directory, currentRootAttributes);
+                    var rootNode = new TreeNode(rootEntry.Name) { Tag = rootEntry };
+                    rootNode.Nodes.Add("...");
+                    tvFiles.Nodes.Add(rootNode);
+                    rootNode.Expand();
+                    lblStatus.Text = $"Opened: {rootPath}";
+                }
+                else
+                {
+                    lblStatus.Text = "Open folder cancelled.";
+                }
+            }
+        }
+
 
         // Handles lazy loading of TreeView nodes
         private void TvFiles_BeforeExpand(object sender, TreeViewCancelEventArgs e)
         {
             TreeNode node = e.Node;
             var nodeEntry = node.Tag as FileSystemEntry;
-            // Only load children for directories and if it has the placeholder
             if (nodeEntry == null || nodeEntry.Type == FileSystemEntryType.File || node.Nodes.Count != 1 || node.Nodes[0].Text != "...")
             {
                 return;
@@ -616,6 +813,18 @@ namespace FileManagementSystem
             lblStatus.Text = "No file selected or file type not previewable/editable.";
         }
 
+
+        // Helper to clear clipboard state
+        private void ClearClipboardState()
+        {
+            _clipboardSourcePath = null;
+            _clipboardSourceType = FileSystemEntryType.File; // Reset to default
+            _isCutOperation = false;
+            btnPaste.Enabled = false; // Disable Paste button
+            lblStatus.Text = "Clipboard cleared.";
+        }
+
+
         // Helper method to find a TreeNode by its full path (used for refreshing after changes)
         private TreeNode FindNodeByPath(string path)
         {
@@ -636,20 +845,14 @@ namespace FileManagementSystem
                 return currentNode;
             }
 
-            // Only search expanded nodes or nodes that have the placeholder (meaning children haven't been loaded yet)
-            // If the target path is deep, its parent nodes might need to be explicitly expanded/loaded.
             if (currentNode.IsExpanded || (currentNode.Nodes.Count == 1 && currentNode.Nodes[0].Text == "..."))
             {
                 foreach (TreeNode childNode in currentNode.Nodes)
                 {
-                    // If a child node is a directory and not yet loaded (has placeholder),
-                    // we can temporarily load it to search within it.
                     var childEntry = childNode.Tag as FileSystemEntry;
                     if (childEntry != null && childEntry.Type == FileSystemEntryType.Directory &&
                         childNode.Nodes.Count == 1 && childNode.Nodes[0].Text == "...")
                     {
-                        // Temporarily expand/load children to search deeper
-                        // Detach/reattach BeforeExpand to avoid infinite loops
                         tvFiles.BeforeExpand -= TvFiles_BeforeExpand;
                         TvFiles_BeforeExpand(tvFiles, new TreeViewCancelEventArgs(childNode, false, TreeViewAction.Expand));
                         tvFiles.BeforeExpand += TvFiles_BeforeExpand;
@@ -661,5 +864,6 @@ namespace FileManagementSystem
             }
             return null;
         }
+
     }
 }
