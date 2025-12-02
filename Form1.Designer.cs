@@ -398,7 +398,7 @@ namespace FileManagementSystem
         private System.Windows.Forms.Button btnRename;
         private System.Windows.Forms.Button btnRefresh;
         private System.Windows.Forms.Button btnCopy;
-        private System.Windows.Forms.Button btnCut; // Declaration for new Cut button
+        private System.Windows.Forms.Button btnCut;
         private System.Windows.Forms.Button btnPaste;
         private System.Windows.Forms.Label lblStatus;
         private System.Windows.Forms.Label lblInstructions;
@@ -408,6 +408,6 @@ namespace FileManagementSystem
         private System.Windows.Forms.Panel rightPanel;
         private System.Windows.Forms.Panel buttonPanel;
         private System.Windows.Forms.Label lblPathLabel;
-        private System.Windows.Forms.ToolTip toolTip1; // Declaration for ToolTip component
+        private System.Windows.Forms.ToolTip toolTip1; 
     }
 }
