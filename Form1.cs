@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using System.Collections.Generic;
+using PdfiumViewer;
 
 namespace FileManagementSystem
 {
@@ -16,6 +17,7 @@ namespace FileManagementSystem
 
         private static readonly string[] ImageExtensions = { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".ico" };
         private static readonly string[] TextExtensions = { ".txt", ".cs", ".json", ".xml", ".html", ".css", ".js", ".md", ".log" };
+        private static readonly string[] PdfExtensions = { ".pdf" };
 
         private string _currentEditedFilePath = null; // Path of the file currently in the content editor
 
@@ -731,19 +733,46 @@ namespace FileManagementSystem
         // Displays file content (image or editable text) in the preview area
         private void ShowFileContent(string path)
         {
-            _currentEditedFilePath = null; // Reset edited path when a new selection is made
-            btnSave.Visible = false;       // Hide save button by default
+            _currentEditedFilePath = null;
+            btnSave.Visible = false;
 
             var ext = Path.GetExtension(path).ToLower();
 
+            // Handle PDF files - render as image
+            if (PdfExtensions.Contains(ext))
+            {
+                txtFileContent.Visible = false;
+                pbPreview.Visible = true;
+                pbPreview.Image?.Dispose();
+
+                try
+                {
+                    using (var document = PdfiumViewer.PdfDocument.Load(path))
+                    {
+                        // Render the first page as an image at 150 DPI for better quality
+                        var image = document.Render(0, 150, 150, false); // page 0 (first page), 150 DPI
+                        pbPreview.Image = image;
+                    }
+                    lblStatus.Text = $"Previewing PDF: {Path.GetFileName(path)} (Page 1 of document)";
+                }
+                catch (Exception ex)
+                {
+                    ClearContentArea();
+                    txtFileContent.Visible = true;
+                    txtFileContent.Text = $"Error rendering PDF: {ex.Message}";
+                    lblStatus.Text = $"Error loading PDF: {ex.Message}";
+                }
+                return;
+            }
+
+            // Handle image files
             if (ImageExtensions.Contains(ext))
             {
                 txtFileContent.Visible = false;
                 pbPreview.Visible = true;
-                pbPreview.Image?.Dispose(); // Release previous image resource
+                pbPreview.Image?.Dispose();
                 try
                 {
-                    // Using FileStream to avoid file locking issues when displaying images
                     using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read))
                     {
                         pbPreview.Image = Image.FromStream(fs);
@@ -763,13 +792,14 @@ namespace FileManagementSystem
                 return;
             }
 
+            // Handle text files
             if (TextExtensions.Contains(ext))
             {
-                _currentEditedFilePath = path; // Set current file for potential editing
+                _currentEditedFilePath = path;
                 pbPreview.Visible = false;
                 txtFileContent.Visible = true;
-                txtFileContent.ReadOnly = false; // Enable editing for text files
-                btnSave.Visible = true;          // Show Save button
+                txtFileContent.ReadOnly = false;
+                btnSave.Visible = true;
 
                 try
                 {
@@ -779,15 +809,15 @@ namespace FileManagementSystem
                 catch (IOException ex)
                 {
                     txtFileContent.Text = $"Error reading file: {ex.Message}";
-                    txtFileContent.ReadOnly = true; // Make read-only on error
-                    btnSave.Visible = false;        // Hide save button on error
+                    txtFileContent.ReadOnly = true;
+                    btnSave.Visible = false;
                     lblStatus.Text = $"Error reading {Path.GetFileName(path)}: {ex.Message}";
                 }
                 catch (Exception ex)
                 {
                     txtFileContent.Text = $"An unexpected error occurred while reading file: {ex.Message}";
-                    txtFileContent.ReadOnly = true; // Make read-only on error
-                    btnSave.Visible = false;        // Hide save button on error
+                    txtFileContent.ReadOnly = true;
+                    btnSave.Visible = false;
                     lblStatus.Text = $"Unexpected error reading {Path.GetFileName(path)}: {ex.Message}";
                 }
                 return;
