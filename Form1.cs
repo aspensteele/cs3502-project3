@@ -1,12 +1,13 @@
 ﻿// Form1.cs
 
+using PdfiumViewer;
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
-using System.Collections.Generic;
-using PdfiumViewer;
 
 namespace FileManagementSystem
 {
@@ -579,32 +580,86 @@ namespace FileManagementSystem
         // Handler for Open Folder button
         private void BtnOpen_Click(object sender, EventArgs e)
         {
-            using (var fbd = new FolderBrowserDialog())
+            var selectedNode = tvFiles.SelectedNode;
+            if (selectedNode == null)
             {
-                fbd.Description = "Select a folder to browse:";
-                fbd.ShowNewFolderButton = false;
-
-                if (fbd.ShowDialog(this) == DialogResult.OK)
+                // If nothing is selected, perhaps allow browsing for a new root folder
+                using (var fbd = new FolderBrowserDialog())
                 {
-                    rootPath = fbd.SelectedPath;
-                    txtPath.Text = rootPath;
+                    fbd.Description = "Select a folder to browse:";
+                    fbd.ShowNewFolderButton = false;
 
-                    tvFiles.Nodes.Clear();
-                    FileAttributes currentRootAttributes = FileAttributes.Directory;
-                    try { currentRootAttributes = File.GetAttributes(rootPath); }
-                    catch { /* default to directory */ }
+                    if (fbd.ShowDialog(this) == DialogResult.OK)
+                    {
+                        rootPath = fbd.SelectedPath;
+                        txtPath.Text = rootPath;
 
-                    var rootEntry = new FileSystemEntry(Path.GetFileName(rootPath), rootPath, FileSystemEntryType.Directory, currentRootAttributes);
-                    var rootNode = new TreeNode(rootEntry.Name) { Tag = rootEntry };
-                    rootNode.Nodes.Add("...");
-                    tvFiles.Nodes.Add(rootNode);
-                    rootNode.Expand();
-                    lblStatus.Text = $"Opened: {rootPath}";
+                        tvFiles.Nodes.Clear();
+                        FileAttributes currentRootAttributes = FileAttributes.Directory;
+                        try { currentRootAttributes = File.GetAttributes(rootPath); }
+                        catch { /* default to directory */ }
+
+                        var rootEntry = new FileSystemEntry(Path.GetFileName(rootPath), rootPath, FileSystemEntryType.Directory, currentRootAttributes);
+                        var rootNode = new TreeNode(rootEntry.Name) { Tag = rootEntry };
+                        rootNode.Nodes.Add("...");
+                        tvFiles.Nodes.Add(rootNode);
+                        rootNode.Expand();
+                        lblStatus.Text = $"Opened root: {rootPath}";
+                    }
+                    else
+                    {
+                        lblStatus.Text = "Open folder cancelled.";
+                    }
                 }
-                else
+                return; // Exit after handling folder browsing
+            }
+
+            var selectedEntry = selectedNode.Tag as FileSystemEntry;
+            if (selectedEntry == null)
+            {
+                lblStatus.Text = "Selected item is not a valid file system entry.";
+                return;
+            }
+
+            try
+            {
+                if (selectedEntry.Type == FileSystemEntryType.File)
                 {
-                    lblStatus.Text = "Open folder cancelled.";
+                    // Open the file with its default associated application
+                    Process.Start(new ProcessStartInfo(selectedEntry.FullPath) { UseShellExecute = true });
+                    lblStatus.Text = $"Opened file externally: {selectedEntry.Name}";
                 }
+                else // Directory
+                {
+                    // Option 1: Expand the directory in the TreeView (if not already expanded)
+                    if (!selectedNode.IsExpanded)
+                    {
+                        selectedNode.Expand();
+                        lblStatus.Text = $"Expanded directory: {selectedEntry.Name}";
+                    }
+                    else
+                    {
+                        // Option 2: Open the directory in Windows Explorer
+                        Process.Start(new ProcessStartInfo(selectedEntry.FullPath) { UseShellExecute = true });
+                        lblStatus.Text = $"Opened directory in Explorer: {selectedEntry.Name}";
+                    }
+
+                    // You could also offer both:
+                    // DialogResult result = MessageBox.Show("Open in Explorer or expand in TreeView?", "Open Directory", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                    // if (result == DialogResult.Yes) { Process.Start(new ProcessStartInfo(selectedEntry.FullPath) { UseShellExecute = true }); }
+                    // else if (result == DialogResult.No) { if (!selectedNode.IsExpanded) selectedNode.Expand(); }
+                }
+            }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                // This exception occurs if no application is associated with the file type
+                MessageBox.Show(this, $"No application is associated with this file type or access denied: {ex.Message}", "Open Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                lblStatus.Text = $"Error opening {selectedEntry.Name}: {ex.Message}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Error opening {selectedEntry.Name}: {ex.Message}", "Open Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                lblStatus.Text = $"Error opening {selectedEntry.Name}: {ex.Message}";
             }
         }
 
