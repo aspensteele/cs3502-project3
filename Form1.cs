@@ -3,7 +3,7 @@
 using PdfiumViewer;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
+using System.Diagnostics; 
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -14,7 +14,7 @@ namespace FileManagementSystem
     public partial class Form1 : Form
     {
         private string rootPath;
-        private FileSystemManager _fileSystemManager;
+        private readonly FileSystemManager _fileSystemManager; // Made readonly as it's initialized once
 
         private static readonly string[] ImageExtensions = { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".ico" };
         private static readonly string[] TextExtensions = { ".txt", ".cs", ".json", ".xml", ".html", ".css", ".js", ".md", ".log" };
@@ -35,33 +35,47 @@ namespace FileManagementSystem
             _fileSystemManager = new FileSystemManager();
 
             // Set initial root path and handle potential issues
-            rootPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            FileAttributes rootAttributes = FileAttributes.Normal;
+            string initialRootCandidate = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            FileAttributes currentRootAttributes;
+
             try
             {
-                if (Directory.Exists(rootPath))
+                if (Directory.Exists(initialRootCandidate))
                 {
-                    rootAttributes = File.GetAttributes(rootPath);
+                    rootPath = initialRootCandidate;
+                    currentRootAttributes = File.GetAttributes(rootPath);
                 }
                 else
                 {
                     rootPath = AppDomain.CurrentDomain.BaseDirectory; // Fallback to application directory
-                    rootAttributes = File.GetAttributes(rootPath);
-                    MessageBox.Show(this, $"User profile path not found, defaulting to application directory: {rootPath}", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    // Try to get attributes, but assume directory if it fails
+                    try { currentRootAttributes = File.GetAttributes(rootPath); }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Error getting attributes for fallback root '{rootPath}': {ex.Message}");
+                        currentRootAttributes = FileAttributes.Directory;
+                    }
+
+                    MessageBox.Show(this,
+                        $"User profile path not found, defaulting to application directory: {rootPath}",
+                        "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) // Catch-all for initial root determination
             {
-                rootPath = AppDomain.CurrentDomain.BaseDirectory;
-                rootAttributes = FileAttributes.Directory; // Assume it's a directory
-                MessageBox.Show(this, $"Error accessing user profile path. Defaulting to application directory: {rootPath}\nError: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                rootPath = AppDomain.CurrentDomain.BaseDirectory; // Ensure fallback is set
+                currentRootAttributes = FileAttributes.Directory; // Assume it's a directory if attributes cannot be read
+
+                MessageBox.Show(this,
+                    $"Error accessing initial root path. Defaulting to application directory: {rootPath}\nError: {ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
 
             txtPath.Text = rootPath;
-            lblInstructions.Visible = false;
+            lblInstructions.Visible = false; // Assuming this is not needed on startup
 
             // Initialize root node in TreeView
-            var rootEntry = new FileSystemEntry(Path.GetFileName(rootPath), rootPath, FileSystemEntryType.Directory, rootAttributes);
+            var rootEntry = new FileSystemEntry(Path.GetFileName(rootPath), rootPath, FileSystemEntryType.Directory, currentRootAttributes);
             var rootNode = new TreeNode(rootEntry.Name) { Tag = rootEntry };
             rootNode.Nodes.Add("..."); // Placeholder for lazy loading
             tvFiles.Nodes.Add(rootNode);
@@ -75,13 +89,13 @@ namespace FileManagementSystem
             btnDelete.Click += BtnDelete_Click;
             btnRename.Click += BtnRename_Click;
             btnCopy.Click += BtnCopy_Click;
-            btnCut.Click += BtnCut_Click; // New Cut button handler
+            btnCut.Click += BtnCut_Click;
             btnPaste.Click += BtnPaste_Click;
             btnOpen.Click += BtnOpen_Click;
 
             // Initial state for buttons
-            btnSave.Visible = false; // Hide save until a text file is open for editing
-            btnPaste.Enabled = false; // Disable paste until something is copied/cut
+            btnSave.Visible = false;      // Hide save until a text file is open for editing
+            btnPaste.Enabled = false;     // Disable paste until something is copied/cut
         }
 
 
@@ -106,19 +120,24 @@ namespace FileManagementSystem
         // Handler for the Refresh button
         private void BtnRefresh_Click(object sender, EventArgs e)
         {
-            TreeNode selectedNode = tvFiles.SelectedNode ?? tvFiles.Nodes[0];
-            if (selectedNode != null)
+            // If no node is selected, default to refreshing the first root node
+            TreeNode selectedNode = tvFiles.SelectedNode ?? tvFiles.Nodes.OfType<TreeNode>().FirstOrDefault();
+
+            if (selectedNode == null)
             {
-                var entry = selectedNode.Tag as FileSystemEntry;
-                if (entry != null && entry.Type == FileSystemEntryType.Directory)
-                {
-                    RefreshNode(selectedNode);
-                    lblStatus.Text = $"Refreshed: {entry.Name}";
-                }
-                else
-                {
-                    lblStatus.Text = "Cannot refresh a file. Select a directory.";
-                }
+                lblStatus.Text = "No item selected and no root node found to refresh.";
+                return;
+            }
+
+            var entry = selectedNode.Tag as FileSystemEntry;
+            if (entry != null && entry.Type == FileSystemEntryType.Directory)
+            {
+                RefreshNode(selectedNode);
+                lblStatus.Text = $"Refreshed: {entry.Name}";
+            }
+            else
+            {
+                lblStatus.Text = "Cannot refresh a file. Select a directory.";
             }
         }
 
@@ -139,14 +158,16 @@ namespace FileManagementSystem
                 string parentDir = Path.GetDirectoryName(_currentEditedFilePath);
                 if (!string.IsNullOrEmpty(parentDir) && !_fileSystemManager.IsDirectory(parentDir))
                 {
+                    // Note:  FileSystemManager.CreateDirectory doesn't implicitly create parent directories,
+                    // but System.IO.Directory.CreateDirectory does. If _fileSystemManager.CreateDirectory is
+                    // meant to be strict, this check helps prevent errors.
                     _fileSystemManager.CreateDirectory(parentDir); // Ensure parent exists
                 }
 
                 _fileSystemManager.WriteTextFile(_currentEditedFilePath, txtFileContent.Text);
 
                 lblStatus.Text = $"Saved: {Path.GetFileName(_currentEditedFilePath)}";
-                MessageBox.Show(this, $"File saved: {Path.GetFileName(_currentEditedFilePath)}", "Success",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                // Removed redundant MessageBox.Show for success
 
                 if (isNewFile)
                 {
@@ -154,7 +175,8 @@ namespace FileManagementSystem
                     TreeNode parentNode = FindNodeByPath(parentDirPath);
                     if (parentNode != null)
                     {
-                        RefreshNode(parentNode);
+                        RefreshNode(parentNode); // Refresh parent to show new file
+                        // After refresh, try to re-select the new file
                         foreach (TreeNode node in parentNode.Nodes)
                         {
                             var entry = node.Tag as FileSystemEntry;
@@ -168,7 +190,8 @@ namespace FileManagementSystem
                     }
                     else
                     {
-                        RefreshNode(tvFiles.Nodes[0]);
+                        // If parent not found, refresh the root to potentially pick up the new file
+                        RefreshNode(tvFiles.Nodes.OfType<TreeNode>().FirstOrDefault());
                     }
                 }
             }
@@ -218,32 +241,25 @@ namespace FileManagementSystem
 
             string newPath = Path.Combine(targetDir, itemName);
 
-            if (_fileSystemManager.PathExists(newPath))
-            {
-                MessageBox.Show(this, $"A {(isFile ? "file" : "directory")} with that name already exists. Please choose a different name.", "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
             try
             {
                 if (isFile)
                 {
+                    _fileSystemManager.CreateFile(newPath); // This uses the original FileSystemManager's CreateFile
                     _currentEditedFilePath = newPath;
                     txtFileContent.Text = "";
                     txtFileContent.ReadOnly = false;
                     txtFileContent.Visible = true;
                     pbPreview.Visible = false;
                     btnSave.Visible = true;
-                    lblStatus.Text = $"New file '{itemName}' ready for content. Press Save to create on disk.";
+                    lblStatus.Text = $"New file '{itemName}' created and ready for content.";
                 }
                 else // Create Directory
                 {
                     _fileSystemManager.CreateDirectory(newPath);
                     RefreshNode(FindNodeByPath(targetDir)); // Refresh parent to show new directory
                     lblStatus.Text = $"Created directory: {itemName}";
-                    MessageBox.Show(this, $"Directory created: {itemName}", "Success",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // Removed redundant MessageBox.Show for success
                 }
             }
             catch (IOException ex)
@@ -276,7 +292,8 @@ namespace FileManagementSystem
             if (selectedEntry == null) return;
 
             DialogResult confirmResult;
-            if (selectedEntry.Type == FileSystemEntryType.Directory && Directory.EnumerateFileSystemEntries(selectedEntry.FullPath).Any())
+            // Use FileSystemManager's GetDirectoryContents for checking if directory is empty
+            if (selectedEntry.Type == FileSystemEntryType.Directory && _fileSystemManager.GetDirectoryContents(selectedEntry.FullPath).Any())
             {
                 confirmResult = MessageBox.Show(this,
                     $"The directory '{selectedEntry.Name}' is not empty. Deleting it will permanently remove all its contents. Are you sure?",
@@ -304,7 +321,10 @@ namespace FileManagementSystem
                     }
                     else // Directory
                     {
-                        if (Directory.EnumerateFileSystemEntries(selectedEntry.FullPath).Any())
+                        // FileSystemManager.DeleteFileSystemEntry for directories expects an empty directory,
+                        // otherwise it will throw an IOException.
+                        // We need to call DeleteDirectoryRecursive if it's not empty.
+                        if (_fileSystemManager.GetDirectoryContents(selectedEntry.FullPath).Any())
                         {
                             _fileSystemManager.DeleteDirectoryRecursive(selectedEntry.FullPath);
                         }
@@ -325,13 +345,12 @@ namespace FileManagementSystem
                     else
                     {
                         // If parent node couldn't be found (e.g., root deleted), refresh root
-                        RefreshNode(tvFiles.Nodes[0]);
+                        RefreshNode(tvFiles.Nodes.OfType<TreeNode>().FirstOrDefault());
                     }
 
                     ClearContentArea(); // Clear preview after deletion
                     lblStatus.Text = $"Deleted: {selectedEntry.Name}";
-                    MessageBox.Show(this, $"Deleted: {selectedEntry.Name}", "Success",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // Removed redundant MessageBox.Show for success
                 }
                 catch (IOException ex)
                 {
@@ -383,13 +402,35 @@ namespace FileManagementSystem
                 selectedEntry.FullPath = newFullPath; // Update full path
                 selectedNode.Text = newName; // Update the displayed text in the TreeView
 
-                RefreshNode(FindNodeByPath(parentDirPath)); // Refresh parent to reflect potential sorting changes
+                // Find the parent node to refresh its children.
+                // The parent's path doesn't change on child rename.
+                TreeNode parentNodeToRefresh = FindNodeByPath(parentDirPath);
+                if (parentNodeToRefresh != null)
+                {
+                    RefreshNode(parentNodeToRefresh);
+                }
+                else
+                {
+                    // If parent node couldn't be found (e.g., trying to rename root), refresh root
+                    RefreshNode(tvFiles.Nodes.OfType<TreeNode>().FirstOrDefault());
+                }
+
 
                 // After rename, ensure the item is still selected and preview is updated if it's a file
-                tvFiles.SelectedNode = selectedNode;
-                if (selectedEntry.Type == FileSystemEntryType.File)
+                // We need to re-find the node since RefreshNode might re-create it
+                TreeNode renamedNode = FindNodeByPath(newFullPath);
+                if (renamedNode != null)
                 {
-                    ShowFileContent(newFullPath);
+                    tvFiles.SelectedNode = renamedNode;
+                    renamedNode.EnsureVisible();
+                    if (selectedEntry.Type == FileSystemEntryType.File)
+                    {
+                        ShowFileContent(newFullPath);
+                    }
+                    else
+                    {
+                        ClearContentArea();
+                    }
                 }
                 else
                 {
@@ -397,8 +438,7 @@ namespace FileManagementSystem
                 }
 
                 lblStatus.Text = $"Renamed '{oldName}' to '{newName}'";
-                MessageBox.Show(this, $"Renamed: '{oldName}' to '{newName}'", "Success",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                // Removed redundant MessageBox.Show for success
             }
             catch (IOException ex)
             {
@@ -480,7 +520,8 @@ namespace FileManagementSystem
             string destinationPath = Path.Combine(destinationDir, sourceItemName);
 
             // Cannot paste into itself or its child (for directories)
-            if (_clipboardSourceType == FileSystemEntryType.Directory && destinationPath.StartsWith(_clipboardSourcePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            if (_clipboardSourceType == FileSystemEntryType.Directory &&
+                destinationPath.StartsWith(_clipboardSourcePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             {
                 MessageBox.Show(this, "Cannot paste a directory into itself or its subdirectory.", "Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -490,8 +531,7 @@ namespace FileManagementSystem
             // Prevent pasting an item back to its exact same location for a "move" (cut) operation
             if (_isCutOperation && _clipboardSourcePath.Equals(destinationPath, StringComparison.OrdinalIgnoreCase))
             {
-                MessageBox.Show(this, "Cannot move an item to its original location.", "Information",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                lblStatus.Text = "Cannot move an item to its original location.";
                 return;
             }
 
@@ -577,13 +617,13 @@ namespace FileManagementSystem
             }
         }
 
-        // Handler for Open Folder button
+        // Handler for Open button (now opens externally or expands in tree)
         private void BtnOpen_Click(object sender, EventArgs e)
         {
             var selectedNode = tvFiles.SelectedNode;
             if (selectedNode == null)
             {
-                // If nothing is selected, perhaps allow browsing for a new root folder
+                // If nothing is selected, allow browsing for a new root folder
                 using (var fbd = new FolderBrowserDialog())
                 {
                     fbd.Description = "Select a folder to browse:";
@@ -595,16 +635,20 @@ namespace FileManagementSystem
                         txtPath.Text = rootPath;
 
                         tvFiles.Nodes.Clear();
-                        FileAttributes currentRootAttributes = FileAttributes.Directory;
+                        FileAttributes currentRootAttributes;
                         try { currentRootAttributes = File.GetAttributes(rootPath); }
-                        catch { /* default to directory */ }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error getting attributes for new root '{rootPath}': {ex.Message}");
+                            currentRootAttributes = FileAttributes.Directory;
+                        }
 
                         var rootEntry = new FileSystemEntry(Path.GetFileName(rootPath), rootPath, FileSystemEntryType.Directory, currentRootAttributes);
                         var rootNode = new TreeNode(rootEntry.Name) { Tag = rootEntry };
                         rootNode.Nodes.Add("...");
                         tvFiles.Nodes.Add(rootNode);
                         rootNode.Expand();
-                        lblStatus.Text = $"Opened root: {rootPath}";
+                        lblStatus.Text = $"Opened new root: {rootPath}";
                     }
                     else
                     {
@@ -631,7 +675,7 @@ namespace FileManagementSystem
                 }
                 else // Directory
                 {
-                    // Option 1: Expand the directory in the TreeView (if not already expanded)
+                    // If directory is not expanded, expand it in the TreeView
                     if (!selectedNode.IsExpanded)
                     {
                         selectedNode.Expand();
@@ -639,26 +683,24 @@ namespace FileManagementSystem
                     }
                     else
                     {
-                        // Option 2: Open the directory in Windows Explorer
+                        // If already expanded, open the directory in Windows Explorer
                         Process.Start(new ProcessStartInfo(selectedEntry.FullPath) { UseShellExecute = true });
                         lblStatus.Text = $"Opened directory in Explorer: {selectedEntry.Name}";
                     }
-
-                    // You could also offer both:
-                    // DialogResult result = MessageBox.Show("Open in Explorer or expand in TreeView?", "Open Directory", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-                    // if (result == DialogResult.Yes) { Process.Start(new ProcessStartInfo(selectedEntry.FullPath) { UseShellExecute = true }); }
-                    // else if (result == DialogResult.No) { if (!selectedNode.IsExpanded) selectedNode.Expand(); }
                 }
             }
             catch (System.ComponentModel.Win32Exception ex)
             {
-                // This exception occurs if no application is associated with the file type
-                MessageBox.Show(this, $"No application is associated with this file type or access denied: {ex.Message}", "Open Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // This exception occurs if no application is associated with the file type or access denied
+                MessageBox.Show(this,
+                    $"No application is associated with this file type or access denied: {ex.Message}",
+                    "Open Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 lblStatus.Text = $"Error opening {selectedEntry.Name}: {ex.Message}";
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, $"Error opening {selectedEntry.Name}: {ex.Message}", "Open Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, $"Error opening {selectedEntry.Name}: {ex.Message}", "Open Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
                 lblStatus.Text = $"Error opening {selectedEntry.Name}: {ex.Message}";
             }
         }
@@ -669,7 +711,10 @@ namespace FileManagementSystem
         {
             TreeNode node = e.Node;
             var nodeEntry = node.Tag as FileSystemEntry;
-            if (nodeEntry == null || nodeEntry.Type == FileSystemEntryType.File || node.Nodes.Count != 1 || node.Nodes[0].Text != "...")
+
+            // Only proceed if it's a directory node with the placeholder
+            if (nodeEntry == null || nodeEntry.Type == FileSystemEntryType.File ||
+                node.Nodes.Count != 1 || node.Nodes[0].Text != "...")
             {
                 return;
             }
@@ -708,7 +753,8 @@ namespace FileManagementSystem
             catch (Exception ex)
             {
                 lblStatus.Text = $"Error loading contents of {parentEntry.Name}: {ex.Message}";
-                MessageBox.Show(this, $"Error loading directory contents: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, $"Error loading directory contents: {ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -718,21 +764,26 @@ namespace FileManagementSystem
             if (node == null) return;
 
             bool wasExpanded = node.IsExpanded; // Store current expansion state
+            TreeNode selectedBeforeRefresh = tvFiles.SelectedNode; // Store currently selected node
 
             node.Nodes.Clear(); // Clear existing children
 
             var nodeEntry = node.Tag as FileSystemEntry;
             if (nodeEntry == null || nodeEntry.Type == FileSystemEntryType.File)
             {
-                return; // Cannot refresh children of a file
+                // Cannot refresh children of a file or invalid node entry
+                return;
             }
 
             node.Nodes.Add("..."); // Re-add placeholder for lazy loading
 
-            // Temporarily detach the event handler to prevent infinite loops during programmatic expansion
+            // Temporarily detach the event handler to prevent re-entry issues during programmatic expansion
             tvFiles.BeforeExpand -= TvFiles_BeforeExpand;
+
             // Manually trigger the logic that BeforeExpand would normally perform
+            // This will load the actual children from the file system
             TvFiles_BeforeExpand(tvFiles, new TreeViewCancelEventArgs(node, false, TreeViewAction.Expand));
+
             // Re-attach the event handler
             tvFiles.BeforeExpand += TvFiles_BeforeExpand;
 
@@ -740,6 +791,30 @@ namespace FileManagementSystem
             if (wasExpanded)
             {
                 node.Expand();
+            }
+
+            // Restore selected node if it was a child of the refreshed node
+            if (selectedBeforeRefresh != null && selectedBeforeRefresh.Parent == node)
+            {
+                // Find the node by its FullPath (which should remain the same after refresh)
+                TreeNode newSelectedNode = FindNodeByPathRecursive(node, (selectedBeforeRefresh.Tag as FileSystemEntry)?.FullPath);
+                if (newSelectedNode != null)
+                {
+                    tvFiles.SelectedNode = newSelectedNode;
+                    newSelectedNode.EnsureVisible();
+                }
+                else
+                {
+                    // If selected node was deleted or renamed, select the parent
+                    tvFiles.SelectedNode = node;
+                    node.EnsureVisible();
+                }
+            }
+            else if (selectedBeforeRefresh == node)
+            {
+                // If the refreshed node itself was selected, keep it selected
+                tvFiles.SelectedNode = node;
+                node.EnsureVisible();
             }
         }
 
@@ -791,14 +866,14 @@ namespace FileManagementSystem
             _currentEditedFilePath = null;
             btnSave.Visible = false;
 
-            var ext = Path.GetExtension(path).ToLower();
+            var ext = Path.GetExtension(path)?.ToLower(); // Use null-conditional operator for safety
 
             // Handle PDF files - render as image
             if (PdfExtensions.Contains(ext))
             {
                 txtFileContent.Visible = false;
                 pbPreview.Visible = true;
-                pbPreview.Image?.Dispose();
+                pbPreview.Image?.Dispose(); // Dispose of previous image
 
                 try
                 {
@@ -813,7 +888,7 @@ namespace FileManagementSystem
                 catch (Exception ex)
                 {
                     ClearContentArea();
-                    txtFileContent.Visible = true;
+                    txtFileContent.Visible = true; // Show text box for error message
                     txtFileContent.Text = $"Error rendering PDF: {ex.Message}";
                     lblStatus.Text = $"Error loading PDF: {ex.Message}";
                 }
@@ -828,6 +903,7 @@ namespace FileManagementSystem
                 pbPreview.Image?.Dispose();
                 try
                 {
+                    // Using a FileStream to prevent file locking issues
                     using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read))
                     {
                         pbPreview.Image = Image.FromStream(fs);
@@ -911,8 +987,10 @@ namespace FileManagementSystem
 
 
         // Helper method to find a TreeNode by its full path (used for refreshing after changes)
+        // This method only searches already loaded/expanded nodes efficiently.
         private TreeNode FindNodeByPath(string path)
         {
+            // Iterate through top-level nodes (roots)
             foreach (TreeNode node in tvFiles.Nodes)
             {
                 TreeNode found = FindNodeByPathRecursive(node, path);
@@ -921,7 +999,7 @@ namespace FileManagementSystem
             return null;
         }
 
-        // Recursive helper for FindNodeByPath
+        // Recursive helper for FindNodeByPath - now only searches already expanded nodes
         private TreeNode FindNodeByPathRecursive(TreeNode currentNode, string path)
         {
             var entry = currentNode.Tag as FileSystemEntry;
@@ -930,25 +1008,17 @@ namespace FileManagementSystem
                 return currentNode;
             }
 
-            if (currentNode.IsExpanded || (currentNode.Nodes.Count == 1 && currentNode.Nodes[0].Text == "..."))
+            // Only recurse into nodes that are already expanded and have children loaded
+            // (i.e., not just the "..." placeholder)
+            if (currentNode.IsExpanded && currentNode.Nodes.Count > 0 && currentNode.Nodes[0].Text != "...")
             {
                 foreach (TreeNode childNode in currentNode.Nodes)
                 {
-                    var childEntry = childNode.Tag as FileSystemEntry;
-                    if (childEntry != null && childEntry.Type == FileSystemEntryType.Directory &&
-                        childNode.Nodes.Count == 1 && childNode.Nodes[0].Text == "...")
-                    {
-                        tvFiles.BeforeExpand -= TvFiles_BeforeExpand;
-                        TvFiles_BeforeExpand(tvFiles, new TreeViewCancelEventArgs(childNode, false, TreeViewAction.Expand));
-                        tvFiles.BeforeExpand += TvFiles_BeforeExpand;
-                    }
-
                     TreeNode found = FindNodeByPathRecursive(childNode, path);
                     if (found != null) return found;
                 }
             }
             return null;
         }
-
     }
 }
