@@ -17,6 +17,8 @@
 - System.Windows.Forms (built-in)
 - System.IO (built-in)
 - System.Drawing (built-in)
+- PdfiumViewer
+- PdfiumViewer.Native.x86_64.v8-xfa
 
 ## Usage
 - Click **Open** to browse to a different root folder
